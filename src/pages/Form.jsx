@@ -144,7 +144,7 @@ export default function Form() {
     return (
         <div className="max-w-5xl mx-auto p-8">
             <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">
-                ⚖️ AI Courtroom Simulator
+                AI Courtroom Simulator
             </h1>
 
             {Object.keys(errors).length > 0 && (
@@ -207,7 +207,7 @@ export default function Form() {
                 {/* Buttons */}
                 <div className="flex items-center justify-between pt-4">
                     <button type="submit" disabled={submitting} className={`px-6 py-2.5 rounded-lg text-white font-medium shadow transition ${submitting ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>
-                        {submitting ? "Submitting..." : "🚀 Start Simulation"}
+                        {submitting ? "Submitting..." : "Start Simulation"}
                     </button>
                     <button type="button" onClick={() => window.location.reload()} className="px-5 py-2.5 rounded-lg border font-medium text-gray-700 hover:bg-gray-100">
                         Reset

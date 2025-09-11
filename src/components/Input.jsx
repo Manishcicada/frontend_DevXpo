@@ -10,7 +10,11 @@ const Input = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentText, setCurrentText] = useState("");
   const [showingJustification, setShowingJustification] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [showNextButton, setShowNextButton] = useState(false);
+  const [hasStarted, setHasStarted] = useState(false);
   const scrollRef = useRef(null);
+  const typingIntervalRef = useRef(null);
 
   // Auto-scroll to bottom when text updates
   useEffect(() => {
@@ -19,72 +23,93 @@ const Input = () => {
     }
   }, [currentText]);
 
-  useEffect(() => {
-    if (!dataReady || !response) return;
+  // Clear any existing typing animation
+  const clearTyping = () => {
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+  };
 
-    // Check if we've finished the transcript and should show justification
-    if (response.transcript && currentIndex >= response.transcript.length) {
-      if (response.judge?.justification && !showingJustification) {
-        setShowingJustification(true);
-        setAvatar(0); // Set to judge avatar
+  // Start typing animation for current item
+  const startTyping = (content, isJustificationText = false) => {
+    if (!content || typeof content !== 'string') return;
+    
+    clearTyping(); // Clear any existing animation
+    setIsTyping(true);
+    setCurrentText("");
+    
+    let i = 0;
+    const chars = content.split(''); // Split into individual characters
+
+    typingIntervalRef.current = setInterval(() => {
+      if (i < chars.length) {
+        setCurrentText((prev) => prev + chars[i]);
+        i++;
+      } else {
+        clearInterval(typingIntervalRef.current);
+        typingIntervalRef.current = null;
+        setIsTyping(false);
         
-        let i = 0;
-        setCurrentText(""); // reset text
-        const justification = response.judge.justification;
-
-        const interval = setInterval(() => {
-          setCurrentText((prev) => prev + justification[i]);
-          i++;
-          if (i >= justification.length) {
-            clearInterval(interval);
-            // Final case is complete - no more transitions
-          }
-        }, 40);
-
-        return () => clearInterval(interval);
+        // Show next button only if there's more content or we haven't shown justification yet
+        if (!isJustificationText && (currentIndex + 1 < response?.transcript?.length || response?.judge?.justification)) {
+          setShowNextButton(true);
+        } else if (isJustificationText) {
+          // Final case - no next button needed
+          setShowNextButton(false);
+        }
       }
-      return; // Don't proceed with transcript logic if we're past it
+    }, isJustificationText ? 40 : 50);
+  };
+
+  // Handle next button click
+  const handleNext = () => {
+    setShowNextButton(false);
+    clearTyping(); // Clear any existing typing
+
+    // Check if we should show justification
+    if (currentIndex + 1 >= response?.transcript?.length && response?.judge?.justification && !showingJustification) {
+      setShowingJustification(true);
+      setAvatar(0); // Set to judge avatar
+      startTyping(response.judge.justification, true);
+      return;
     }
 
-    // Regular transcript logic
-    if (!response?.transcript) return;
+    // Move to next transcript item
+    if (currentIndex + 1 < response?.transcript?.length) {
+      setCurrentIndex(prev => prev + 1);
+    }
+  };
 
-    const transcript = response.transcript;
-    if (currentIndex >= transcript.length) return;
+  // Effect to handle initial setup and index changes
+  useEffect(() => {
+    if (!dataReady || !response?.transcript?.length) return;
+    
+    if (showingJustification) return;
 
-    const currentItem = transcript[currentIndex];
+    const currentItem = response.transcript[currentIndex];
     if (!currentItem?.agent || !currentItem?.content) return;
 
     const agent = currentItem.agent;
     const content = currentItem.content;
 
-    // Only set avatar if agent exists
-    const avatarIndex =
-      agent === "judge" ? 0 : agent === "defense" ? 2 : 1;
+    // Set avatar
+    const avatarIndex = agent === "judge" ? 0 : agent === "defense" ? 2 : 1;
     setAvatar(avatarIndex);
 
-    let i = 0;
-    setCurrentText(""); // reset text
+    // Start typing animation
+    if (!hasStarted || currentIndex > 0) {
+      setHasStarted(true);
+      startTyping(content);
+    }
+  }, [currentIndex, dataReady, response, setAvatar, showingJustification, hasStarted]);
 
-    const interval = setInterval(() => {
-      setCurrentText((prev) => prev + content[i]);
-      i++;
-      if (i >= content.length) {
-        clearInterval(interval);
-        setTimeout(() => {
-          // Only increment if we haven't reached the end
-          if (currentIndex + 1 < transcript.length) {
-            setCurrentIndex((prev) => prev + 1);
-          } else {
-            // We've reached the end of transcript, trigger justification
-            setCurrentIndex((prev) => prev + 1);
-          }
-        }, 2000);
-      }
-    }, 50);
-
-    return () => clearInterval(interval);
-  }, [currentIndex, dataReady, response, setAvatar, showingJustification]);
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      clearTyping();
+    };
+  }, []);
 
   if (!dataReady) {
     return (
@@ -105,25 +130,40 @@ const Input = () => {
 
   return (
     <div className="fixed bottom-4 left-0 w-full flex justify-center p-4 z-50">
-      <div 
-        ref={scrollRef}
-        className="bg-white bg-opacity-80 rounded-lg max-w-3xl w-full p-4 max-h-64 overflow-auto scroll-smooth"
-      >
-        {currentText && (
-          <div>
-            <p>
-              <strong>
-                {showingJustification ? "JUDGE (FINAL VERDICT)" : currentAgent.toUpperCase()}:
-              </strong> 
-              <span className="ml-2">
-                <ReactMarkdown>{currentText}</ReactMarkdown>
-              </span>
-            </p>
-            {showingJustification && (
-              <div className="mt-4 text-sm text-stone-950 italic">
-                Case concluded.
-              </div>
-            )}
+      <div className="max-w-3xl w-full">
+        <div 
+          ref={scrollRef}
+          className="bg-white bg-opacity-90 rounded-lg w-full p-4 max-h-64 overflow-y-auto mb-4 shadow-lg"
+          style={{ scrollBehavior: 'smooth' }}
+        >
+          {currentText && (
+            <div>
+              <p>
+                <strong className="text-gray-800">
+                  {showingJustification ? "JUDGE (FINAL VERDICT)" : currentAgent?.toUpperCase()}:
+                </strong> 
+                <span className="ml-2">
+                  <ReactMarkdown>{currentText}</ReactMarkdown>
+                </span>
+              </p>
+              {showingJustification && (
+                <div className="mt-4 text-sm text-gray-600 italic">
+                  Case concluded.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {/* Next Button */}
+        {showNextButton && !isTyping && (
+          <div className="flex justify-center">
+            <button
+              onClick={handleNext}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-md"
+            >
+              {currentIndex + 1 >= (response?.transcript?.length || 0) ? "Show Verdict" : "Next"}
+            </button>
           </div>
         )}
       </div>
