@@ -13,6 +13,8 @@ const Input = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [showNextButton, setShowNextButton] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(false);
   const scrollRef = useRef(null);
   const typingIntervalRef = useRef(null);
 
@@ -31,11 +33,74 @@ const Input = () => {
     }
   };
 
+  // Stop any ongoing speech
+  const stopSpeech = () => {
+    if ('speechSynthesis' in window) {
+      speechSynthesis.cancel();
+      setIsPlaying(false);
+    }
+  };
+
+  // Speak text with different voice settings for each agent
+  const speakText = (text, agent) => {
+    if (!('speechSynthesis' in window) || !text) return;
+    
+    stopSpeech(); // Stop any ongoing speech
+    setIsPlaying(true);
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    
+    // Different voice settings for each agent
+    switch(agent.toLowerCase()) {
+      case 'judge':
+        utterance.voice = voices.find(v => v.name.includes('Male') && v.lang.includes('en')) || voices[0];
+        utterance.pitch = 0.8;
+        utterance.rate = 0.85;
+        utterance.volume = 0.9;
+        break;
+      case 'defense':
+        utterance.voice = voices.find(v => v.name.includes('Female') && v.lang.includes('en')) || voices[1];
+        utterance.pitch = 1.1;
+        utterance.rate = 1.0;
+        utterance.volume = 0.9;
+        break;
+      case 'opposition':
+        utterance.voice = voices.find(v => v.name.includes('Male') && v.lang.includes('en')) || voices[2];
+        utterance.pitch = 0.9;
+        utterance.rate = 1.05;
+        utterance.volume = 0.9;
+        break;
+      default:
+        utterance.pitch = 1.0;
+        utterance.rate = 1.0;
+        utterance.volume = 0.9;
+    }
+    
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = () => setIsPlaying(false);
+    
+    speechSynthesis.speak(utterance);
+  };
+
+  // Toggle auto-play functionality
+  const toggleAutoPlay = () => {
+    setAutoPlay(!autoPlay);
+    if (!autoPlay && currentText && !isPlaying) {
+      // Start playing current text if turning on auto-play
+      speakText(currentText, currentAgent);
+    } else if (autoPlay && isPlaying) {
+      // Stop playing if turning off auto-play
+      stopSpeech();
+    }
+  };
+
   // Start typing animation for current item
   const startTyping = (content, isJustificationText = false) => {
     if (!content || typeof content !== 'string') return;
     
     clearTyping(); // Clear any existing animation
+    stopSpeech(); // Stop any ongoing speech
     setIsTyping(true);
     setCurrentText("");
     
@@ -51,6 +116,12 @@ const Input = () => {
         typingIntervalRef.current = null;
         setIsTyping(false);
         
+        // Auto-play voice if enabled
+        if (autoPlay) {
+          const agent = isJustificationText ? 'judge' : currentAgent;
+          speakText(content, agent);
+        }
+        
         // Show next button only if there's more content or we haven't shown justification yet
         if (!isJustificationText && (currentIndex + 1 < response?.transcript?.length || response?.judge?.justification)) {
           setShowNextButton(true);
@@ -62,10 +133,39 @@ const Input = () => {
     }, isJustificationText ? 40 : 50);
   };
 
+  // Skip typing animation and show full content
+  const skipTyping = () => {
+    clearTyping();
+    stopSpeech();
+    setIsTyping(false);
+    
+    // Set full content based on current state
+    if (showingJustification && response?.judge?.justification) {
+      setCurrentText(response.judge.justification);
+      if (autoPlay) {
+        speakText(response.judge.justification, 'judge');
+      }
+    } else if (response?.transcript?.[currentIndex]?.content) {
+      const content = response.transcript[currentIndex].content;
+      setCurrentText(content);
+      if (autoPlay) {
+        speakText(content, currentAgent);
+      }
+    }
+    
+    // Show next button if there's more content
+    if (showingJustification) {
+      setShowNextButton(false);
+    } else if (currentIndex + 1 < response?.transcript?.length || response?.judge?.justification) {
+      setShowNextButton(true);
+    }
+  };
+
   // Handle next button click
   const handleNext = () => {
     setShowNextButton(false);
     clearTyping(); // Clear any existing typing
+    stopSpeech(); // Stop any ongoing speech
 
     // Check if we should show justification
     if (currentIndex + 1 >= response?.transcript?.length && response?.judge?.justification && !showingJustification) {
@@ -108,6 +208,7 @@ const Input = () => {
   useEffect(() => {
     return () => {
       clearTyping();
+      stopSpeech();
     };
   }, []);
 
@@ -131,9 +232,44 @@ const Input = () => {
   return (
     <div className="fixed bottom-4 left-0 w-full flex justify-center p-4 z-50">
       <div className="max-w-3xl w-full">
+        {/* Voice Controls */}
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex gap-2">
+            <button
+              onClick={toggleAutoPlay}
+              className={`px-3 py-1 rounded text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                autoPlay 
+                  ? 'bg-green-600 hover:bg-green-700 text-white focus:ring-green-500' 
+                  : 'bg-gray-500 hover:bg-gray-600 text-white focus:ring-gray-400'
+              }`}
+            >
+              🔊 Auto-play {autoPlay ? 'ON' : 'OFF'}
+            </button>
+            
+            {!autoPlay && currentText && (
+              <button
+                onClick={() => speakText(currentText, currentAgent)}
+                disabled={isPlaying}
+                className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-3 py-1 rounded text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
+              >
+                {isPlaying ? '🔊 Playing...' : '🔊 Play'}
+              </button>
+            )}
+            
+            {isPlaying && (
+              <button
+                onClick={stopSpeech}
+                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1"
+              >
+                ⏹️ Stop
+              </button>
+            )}
+          </div>
+        </div>
+
         <div 
           ref={scrollRef}
-          className="bg-white bg-opacity-90 rounded-lg w-full p-4 max-h-64 overflow-y-auto mb-4 shadow-lg"
+          className="bg-white bg-opacity-90 rounded-lg w-full p-4 max-h-64 overflow-y-auto mb-4 shadow-lg relative"
           style={{ scrollBehavior: 'smooth' }}
         >
           {currentText && (
@@ -151,6 +287,18 @@ const Input = () => {
                   Case concluded.
                 </div>
               )}
+            </div>
+          )}
+          
+          {/* Skip Button - only show during typing */}
+          {isTyping && (
+            <div className="absolute bottom-2 right-2">
+              <button
+                onClick={skipTyping}
+                className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-1 shadow-sm"
+              >
+                Skip
+              </button>
             </div>
           )}
         </div>
